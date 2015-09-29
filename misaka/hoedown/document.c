@@ -2778,7 +2778,7 @@ hoedown_document_new(
 
 	if (doc->md.emphasis || doc->md.double_emphasis || doc->md.triple_emphasis) {
 		doc->active_char['*'] = MD_CHAR_EMPHASIS;
-		doc->active_char['_'] = MD_CHAR_EMPHASIS;
+		//doc->active_char['_'] = MD_CHAR_EMPHASIS;
 		if (extensions & HOEDOWN_EXT_STRIKETHROUGH)
 			doc->active_char['~'] = MD_CHAR_EMPHASIS;
 		if (extensions & HOEDOWN_EXT_HIGHLIGHT)
