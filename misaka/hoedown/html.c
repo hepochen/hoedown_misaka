@@ -722,6 +722,8 @@ hoedown_html_renderer_new(hoedown_html_flags render_flags, int nesting_level)
 		rndr_normal_text,
 
 		NULL,
+		NULL,
+
 		NULL
 	};
 

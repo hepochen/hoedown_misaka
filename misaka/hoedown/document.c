@@ -2522,6 +2522,97 @@ parse_block(hoedown_buffer *ob, hoedown_document *doc, uint8_t *data, size_t siz
 }
 
 
+// hepo
+static void
+meta_parse_block(hoedown_buffer *ob, hoedown_document *doc, uint8_t *data, size_t size)
+{
+	size_t beg, end, i, raw_beg, block_type;
+	uint8_t *txt_data;
+	beg = 0;
+	block_type = -1;
+
+	if (doc->work_bufs[BUFFER_SPAN].size +
+		doc->work_bufs[BUFFER_BLOCK].size > doc->max_nesting)
+		return;
+
+	while (beg < size) {
+		txt_data = data + beg;
+		end = size - beg;
+
+		raw_beg = beg;
+
+		if (is_atxheader(doc, txt_data, end)){
+		    beg += parse_atxheader(ob, doc, txt_data, end);
+		    block_type = 0;
+		}
+
+
+		else if (data[beg] == '<' && doc->md.blockhtml &&
+				(i = parse_htmlblock(ob, doc, txt_data, end, 1)) != 0){
+			beg += i;
+			block_type = 1;
+		}
+
+		else if ((i = is_empty(txt_data, end)) != 0){
+			beg += i;
+			block_type = 2;
+		}
+
+		else if (is_hrule(txt_data, end)) {
+			if (doc->md.hrule)
+				doc->md.hrule(ob, &doc->data);
+
+			while (beg < size && data[beg] != '\n')
+				beg++;
+
+			beg++;
+
+			block_type = 3;
+		}
+
+		else if ((doc->ext_flags & HOEDOWN_EXT_FENCED_CODE) != 0 &&
+			(i = parse_fencedcode(ob, doc, txt_data, end)) != 0){
+			beg += i;
+			block_type = 4;
+		}
+
+		else if ((doc->ext_flags & HOEDOWN_EXT_TABLES) != 0 &&
+			(i = parse_table(ob, doc, txt_data, end)) != 0){
+			beg += i;
+			block_type = 5;
+		}
+
+		else if (prefix_quote(txt_data, end)){
+			beg += parse_blockquote(ob, doc, txt_data, end);
+			block_type = 6;
+		}
+
+		else if (!(doc->ext_flags & HOEDOWN_EXT_DISABLE_INDENTED_CODE) && prefix_code(txt_data, end)){
+			beg += parse_blockcode(ob, doc, txt_data, end);
+			block_type = 7;
+		}
+
+		else if (prefix_uli(txt_data, end)){
+			beg += parse_list(ob, doc, txt_data, end, 0);
+			block_type = 8;
+		}
+
+		else if (prefix_oli(txt_data, end)){
+			beg += parse_list(ob, doc, txt_data, end, HOEDOWN_LIST_ORDERED);
+			block_type = 9;
+		}
+
+		else{
+			beg += parse_paragraph(ob, doc, txt_data, end);
+			block_type = 10;
+		}
+
+		if (doc->md.meta_info){
+		    doc->md.meta_info(ob, block_type, beg-raw_beg, &doc->data);
+		}
+	}
+}
+
 
 /*********************
  * REFERENCE PARSING *
@@ -2925,7 +3016,10 @@ hoedown_document_render(hoedown_document *doc, hoedown_buffer *ob, const uint8_t
 		if (text->data[text->size - 1] != '\n' &&  text->data[text->size - 1] != '\r')
 			hoedown_buffer_putc(text, '\n');
 
-		parse_block(ob, doc, text->data, text->size);
+        if (doc->md.meta_info){
+		    doc->md.meta_info(text, -2, text->size, &doc->data);
+		}
+		meta_parse_block(ob, doc, text->data, text->size);
 	}
 
 	/* footnotes */

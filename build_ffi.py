@@ -244,6 +244,9 @@ struct hoedown_renderer {
     /* miscellaneous callbacks */
     void (*doc_header)(hoedown_buffer *ob, int inline_render, const hoedown_renderer_data *data);
     void (*doc_footer)(hoedown_buffer *ob, int inline_render, const hoedown_renderer_data *data);
+
+    /* collection the compile info */
+	void (*meta_info)(hoedown_buffer *ob, int block_type, int block_length, const hoedown_renderer_data *data);
 };
 typedef struct hoedown_renderer hoedown_renderer;
 

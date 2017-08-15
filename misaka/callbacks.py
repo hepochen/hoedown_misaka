@@ -416,6 +416,27 @@ def cb_doc_footer(ob, inline_render, data):
         lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
 
 
+block_types = {
+    0: 'atxheader',
+    1: 'htmlblock',
+    2: 'empty',
+    3: 'hrule',
+    4: 'fencedcode',
+    5: 'table',
+    6: 'blockquote',
+    7: 'blockcode',
+    8: 'list',
+    9: 'ordered_list',
+    10: 'paragraph',
+}
+
+
+@ffi.callback('void(hoedown_buffer *ob, int block_type, int block_length, const hoedown_renderer_data *data)')
+def cb_meta_info(ob, block_type, block_length, data):
+    renderer = ffi.from_handle(lib.misaka_get_renderer(data))
+    block_type = block_types.get(block_type, block_type)
+    renderer.meta_info(block_type, block_length, ob)
+
 python_callbacks = {
     # block level callbacks - NULL skips the block
     'blockcode':    cb_blockcode,
@@ -459,4 +480,8 @@ python_callbacks = {
     # miscellaneous callbacks
     'doc_header': cb_doc_header,
     'doc_footer': cb_doc_footer,
+
+
+    # collection compile meta info
+    'meta_info': cb_meta_info,
 }
