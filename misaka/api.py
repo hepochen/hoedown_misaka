@@ -1,26 +1,29 @@
 # -*- coding: utf-8 -*-
 
-import sys
-import operator as op
-from inspect import getmembers, ismethod
+import re
+try:
+    from urllib.parse import quote as urlquote
+except ImportError:
+    from urllib import quote as urlquote
 
 from ._hoedown import lib, ffi
-
-try:
-    reduce
-except NameError:
-    from functools import reduce
+from .callbacks import python_callbacks, to_string
+from .constants import *
+from .utils import extension_map, html_flag_map, args_to_int, \
+    deprecation, to_string
 
 
 __all__ = [
+    'escape_html',
     'html',
     'smartypants',
     'Markdown',
     'BaseRenderer',
     'HtmlRenderer',
     'HtmlTocRenderer',
+    'SaferHtmlRenderer',
 
-    'reduce_dict',
+    'args_to_int',
     'extension_map',
     'html_flag_map',
 
@@ -58,75 +61,52 @@ __all__ = [
 ]
 
 
-def _set_constants():
-    is_int = lambda n: isinstance(n, int)
-
-    for name, value in getmembers(lib, is_int):
-        if not name.startswith('HOEDOWN_'):
-            continue
-        setattr(sys.modules[__name__], name[8:], value)
-
-
-if not hasattr(sys.modules[__name__], 'EXT_TABLES'):
-    _set_constants()
-
-
-extension_map = {
-    'tables': EXT_TABLES,
-    'fenced-code': EXT_FENCED_CODE,
-    'footnotes': EXT_FOOTNOTES,
-    'autolink': EXT_AUTOLINK,
-    'strikethrough': EXT_STRIKETHROUGH,
-    'underline': EXT_UNDERLINE,
-    'highlight': EXT_HIGHLIGHT,
-    'quote': EXT_QUOTE,
-    'superscript': EXT_SUPERSCRIPT,
-    'math': EXT_MATH,
-    'no-intra-emphasis': EXT_NO_INTRA_EMPHASIS,
-    'space-headers': EXT_SPACE_HEADERS,
-    'math-explicit': EXT_MATH_EXPLICIT,
-    'disable-indented-code': EXT_DISABLE_INDENTED_CODE,
-}
-
-html_flag_map = {
-    'skip-html': HTML_SKIP_HTML,
-    'escape': HTML_ESCAPE,
-    'hard-wrap': HTML_HARD_WRAP,
-    'use-xhtml': HTML_USE_XHTML,
-}
-
-
 IUNIT = 1024
 OUNIT = 64
 MAX_NESTING = 16
 
 
-def to_string(buffer):
-    if buffer == ffi.NULL or buffer.size == 0:
-        return ''
-    return ffi.string(buffer.data, buffer.size).decode('utf-8')
-
-
-def reduce_dict(mapping, argument):
+def escape_html(text, escape_slash=False):
     """
-    Reduce a dictionary to an integer.
+    Binding for Hoedown's HTML escaping function.
 
-    This function is used to reduce a dictionary (e.g. Markdown extensions,
-    HTML render flags.) to an integer by OR'ing the values with eachother.
+    The implementation is inspired by the OWASP XSS Prevention recommendations:
+
+    .. code-block:: none
+
+        & --> &amp;
+        < --> &lt;
+        > --> &gt;
+        " --> &quot;
+        ' --> &#x27;
+        / --> &#x2F;  when escape_slash is set to True
+
+    .. versionadded:: 2.1.0
     """
-    if isinstance(argument, int):
-        return argument
-    elif isinstance(argument, (tuple, list)):
-        return reduce(op.or_, [mapping[n] for n in argument if n in mapping])
+    byte_str = text.encode('utf-8')
+    ob = lib.hoedown_buffer_new(OUNIT)
+    lib.hoedown_escape_html(ob, byte_str, len(byte_str), int(escape_slash))
 
-    raise TypeError('argument must be a list of strings or an int')
+    try:
+        return to_string(ob)
+    finally:
+        lib.hoedown_buffer_free(ob)
 
 
 def html(text, extensions=0, render_flags=0):
     """
     Convert markdown text to HTML.
+
+    ``extensions`` can be a list or tuple of extensions (e.g.
+    ``('fenced-code', 'footnotes', 'strikethrough')``) or an integer
+    (e.g. ``EXT_FENCED_CODE | EXT_FOOTNOTES | EXT_STRIKETHROUGH``).
+
+    ``render_flags`` can be a list or tuple of flags (e.g.
+    ``('skip-html', 'hard-wrap')``) or an integer
+    (e.g. ``HTML_SKIP_HTML | HTML_HARD_WRAP``).
     """
-    render_flags = reduce_dict(html_flag_map, render_flags)
+    extensions = args_to_int(extension_map, extensions)
+    render_flags = args_to_int(html_flag_map, render_flags)
 
     ib = lib.hoedown_buffer_new(IUNIT)
     ob = lib.hoedown_buffer_new(OUNIT)
@@ -176,13 +156,17 @@ def smartypants(text):
         lib.hoedown_buffer_free(ob);
 
 
-class Markdown:
+class Markdown(object):
     """
     Parses markdown text and renders it using the given renderer.
+
+    ``extensions`` can be a list or tuple of extensions (e.g.
+    ``('fenced-code', 'footnotes', 'strikethrough')``) or an integer
+    (e.g. ``EXT_FENCED_CODE | EXT_FOOTNOTES | EXT_STRIKETHROUGH``).
     """
     def __init__(self, renderer, extensions=0):
         self.renderer = renderer
-        self.extensions = reduce_dict(extension_map, extensions)
+        self.extensions = args_to_int(extension_map, extensions)
 
     def __call__(self, text):
         """
@@ -192,7 +176,10 @@ class Markdown:
         lib.hoedown_buffer_puts(ib, text.encode('utf-8'))
 
         ob = lib.hoedown_buffer_new(OUNIT)
-        document = lib.hoedown_document_new(self.renderer.renderer, self.extensions, MAX_NESTING);
+        document = lib.hoedown_document_new(
+            self.renderer.renderer,
+            self.extensions,
+            MAX_NESTING);
         lib.hoedown_document_render(document, ob, ib.data, ib.size);
 
         lib.hoedown_buffer_free(ib)
@@ -204,329 +191,31 @@ class Markdown:
             lib.hoedown_buffer_free(ob);
 
 
-_callback_signatures = {
-    # block level callbacks - NULL skips the block
-    'blockcode':    'void(hoedown_buffer *ob, const hoedown_buffer *text, const hoedown_buffer *lang, const hoedown_renderer_data *data)',
-    'blockquote':   'void(hoedown_buffer *ob, const hoedown_buffer *content, const hoedown_renderer_data *data)',
-    'header':       'void(hoedown_buffer *ob, const hoedown_buffer *content, int level, const hoedown_renderer_data *data)',
-    'hrule':        'void(hoedown_buffer *ob, const hoedown_renderer_data *data)',
-    'list':         'void(hoedown_buffer *ob, const hoedown_buffer *content, hoedown_list_flags flags, const hoedown_renderer_data *data)',
-    'listitem':     'void(hoedown_buffer *ob, const hoedown_buffer *content, hoedown_list_flags flags, const hoedown_renderer_data *data)',
-    'paragraph':    'void(hoedown_buffer *ob, const hoedown_buffer *content, const hoedown_renderer_data *data)',
-    'table':        'void(hoedown_buffer *ob, const hoedown_buffer *content, const hoedown_renderer_data *data)',
-    'table_header': 'void(hoedown_buffer *ob, const hoedown_buffer *content, const hoedown_renderer_data *data)',
-    'table_body':   'void(hoedown_buffer *ob, const hoedown_buffer *content, const hoedown_renderer_data *data)',
-    'table_row':    'void(hoedown_buffer *ob, const hoedown_buffer *content, const hoedown_renderer_data *data)',
-    'table_cell':   'void(hoedown_buffer *ob, const hoedown_buffer *content, hoedown_table_flags flags, const hoedown_renderer_data *data)',
-    'footnotes':    'void(hoedown_buffer *ob, const hoedown_buffer *content, const hoedown_renderer_data *data)',
-    'footnote_def': 'void(hoedown_buffer *ob, const hoedown_buffer *content, unsigned int num, const hoedown_renderer_data *data)',
-    'blockhtml':    'void(hoedown_buffer *ob, const hoedown_buffer *text, const hoedown_renderer_data *data)',
-
-    # span level callbacks - NULL or return 0 prints the span verbatim
-    'autolink':        'int(hoedown_buffer *ob, const hoedown_buffer *link, hoedown_autolink_type type, const hoedown_renderer_data *data)',
-    'codespan':        'int(hoedown_buffer *ob, const hoedown_buffer *text, const hoedown_renderer_data *data)',
-    'double_emphasis': 'int(hoedown_buffer *ob, const hoedown_buffer *content, const hoedown_renderer_data *data)',
-    'emphasis':        'int(hoedown_buffer *ob, const hoedown_buffer *content, const hoedown_renderer_data *data)',
-    'underline':       'int(hoedown_buffer *ob, const hoedown_buffer *content, const hoedown_renderer_data *data)',
-    'highlight':       'int(hoedown_buffer *ob, const hoedown_buffer *content, const hoedown_renderer_data *data)',
-    'quote':           'int(hoedown_buffer *ob, const hoedown_buffer *content, const hoedown_renderer_data *data)',
-    'image':           'int(hoedown_buffer *ob, const hoedown_buffer *link, const hoedown_buffer *title, const hoedown_buffer *alt, const hoedown_renderer_data *data)',
-    'linebreak':       'int(hoedown_buffer *ob, const hoedown_renderer_data *data)',
-    'link':            'int(hoedown_buffer *ob, const hoedown_buffer *content, const hoedown_buffer *link, const hoedown_buffer *title, const hoedown_renderer_data *data)',
-    'triple_emphasis': 'int(hoedown_buffer *ob, const hoedown_buffer *content, const hoedown_renderer_data *data)',
-    'strikethrough':   'int(hoedown_buffer *ob, const hoedown_buffer *content, const hoedown_renderer_data *data)',
-    'superscript':     'int(hoedown_buffer *ob, const hoedown_buffer *content, const hoedown_renderer_data *data)',
-    'footnote_ref':    'int(hoedown_buffer *ob, unsigned int num, const hoedown_renderer_data *data)',
-    'math':            'int(hoedown_buffer *ob, const hoedown_buffer *text, int displaymode, const hoedown_renderer_data *data)',
-    'raw_html':        'int(hoedown_buffer *ob, const hoedown_buffer *text, const hoedown_renderer_data *data)',
-
-    # low level callbacks - NULL copies input directly into the output
-    'entity':      'void(hoedown_buffer *ob, const hoedown_buffer *text, const hoedown_renderer_data *data)',
-    'normal_text': 'void(hoedown_buffer *ob, const hoedown_buffer *text, const hoedown_renderer_data *data)',
-
-    # miscellaneous callbacks
-    'doc_header': 'void(hoedown_buffer *ob, int inline_render, const hoedown_renderer_data *data)',
-    'doc_footer': 'void(hoedown_buffer *ob, int inline_render, const hoedown_renderer_data *data)',
-}
-
-
-class BaseRenderer:
+class BaseRenderer(object):
     def __init__(self):
-        # Use a noop method as a placeholder for render methods that are
-        # implemented so there's no need to check if a render method exists
-        # in a callback.
-        for attr in _callback_signatures.keys():
-            if not hasattr(self, attr):
-                setattr(self, attr, self.noop)
+        self.renderer = ffi.new('hoedown_renderer *')
+        self._renderer_handle = ffi.new_handle(self)
 
-        self._callbacks = {k: ffi.callback(v, getattr(self, '_w_' + k))
-            for k, v in _callback_signatures.items()}
-        self.renderer = ffi.new('hoedown_renderer *', self._callbacks)
+        for name in python_callbacks.keys():
+            if hasattr(self, name):
+                setattr(self.renderer, name, python_callbacks[name])
+            else:
+                setattr(self.renderer, name, ffi.NULL)
 
-    def noop(self, *args, **kwargs):
-        return None
-
-    def _w_blockcode(self, ob, text, lang, data):
-        text = to_string(text)
-        lang = to_string(lang)
-
-        result = self.blockcode(text, lang)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-
-    def _w_blockquote(self, ob, content, data):
-        content = to_string(content)
-        result = self.blockquote(content)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-
-    def _w_header(self, ob, content, level, data):
-        content = to_string(content)
-        level = int(level)
-        result = self.header(content, level)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-
-    def _w_hrule(self, ob, data):
-        result = self.hrule()
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-
-    # flags: LIST_ORDERED, LI_BLOCK.
-    def _w_list(self, ob, content, flags, data):
-        content = to_string(content)
-        flags = int(flags)
-        result = self.list(content, flags)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-
-    # flags: LIST_ORDERED, LI_BLOCK.
-    def _w_listitem(self, ob, content, flags, data):
-        content = to_string(content)
-        flags = int(flags)
-        result = self.listitem(content, flags)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-
-    def _w_paragraph(self, ob, content, data):
-        content = to_string(content)
-        result = self.paragraph(content)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-
-    def _w_table(self, ob, content, data):
-        content = to_string(content)
-        result = self.table(content)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-
-    def _w_table_header(self, ob, content, data):
-        content = to_string(content)
-        result = self.table_header(content)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-
-    def _w_table_body(self, ob, content, data):
-        content = to_string(content)
-        result = self.table_body(content)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-
-    def _w_table_row(self, ob, content, data):
-        content = to_string(content)
-        result = self.table_row(content)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-
-    # flags: TABLE_ALIGNMASK, TABLE_ALIGN_LEFT, TABLE_ALIGN_RIGHT,
-    #        TABLE_ALIGN_CENTER, TABLE_HEADER
-    def _w_table_cell(self, ob, content, flags, data):
-        content = to_string(content)
-        flags = int(flags)
-        result = self.table_cell(content, flags)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-
-    def _w_footnotes(self, ob, content, data):
-        content = to_string(content)
-        result = self.footnotes(content)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-
-    def _w_footnote_def(self, ob, content, num, data):
-        content = to_string(content)
-        num = int(num)
-        result = self.footnote_def(content, num)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-
-    def _w_blockhtml(self, ob, text, data):
-        text = ffi.string(text.data, text.size).decode('utf-8')
-        result = self.blockhtml(text)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-
-    def _w_autolink(self, ob, link, type, data):
-        link = ffi.string(link.data, link.size).decode('utf-8')
-        type = int(type)
-        result = self.autolink(link, type)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-            return 1
-        return 0
-
-    def _w_codespan(self, ob, text, data):
-        text = ffi.string(text.data, text.size).decode('utf-8')
-        result = self.codespan(text)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-            return 1
-        return 0
-
-    def _w_double_emphasis(self, ob, content, data):
-        content = to_string(content)
-        result = self.double_emphasis(content)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-            return 1
-        return 0
-
-    def _w_emphasis(self, ob, content, data):
-        content = to_string(content)
-        result = self.emphasis(content)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-            return 1
-        return 0
-
-    def _w_underline(self, ob, content, data):
-        content = to_string(content)
-        result = self.underline(content)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-            return 1
-        return 0
-
-    def _w_highlight(self, ob, content, data):
-        content = to_string(content)
-        result = self.highlight(content)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-            return 1
-        return 0
-
-    def _w_quote(self, ob, content, data):
-        content = to_string(content)
-        result = self.quote(content)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-            return 1
-        return 0
-
-    def _w_image(self, ob, link, title, alt, data):
-        link = to_string(link)
-        title = to_string(title)
-        alt = to_string(alt)
-        result = self.image(link, title, alt)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-            return 1
-        return 0
-
-    def _w_linebreak(self, ob, data):
-        result = self.linebreak()
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-            return 1
-        return 0
-
-    def _w_link(self, ob, content, link, title, data):
-        content = to_string(content)
-        link = to_string(link)
-        title = to_string(title)
-        result = self.link(content, link, title)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-            return 1
-        return 0
-
-    def _w_triple_emphasis(self, ob, content, data):
-        content = to_string(content)
-        result = self.triple_emphasis(content)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-            return 1
-        return 0
-
-    def _w_strikethrough(self, ob, content, data):
-        content = to_string(content)
-        result = self.strikethrough(content)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-            return 1
-        return 0
-
-    def _w_superscript(self, ob, content, data):
-        content = to_string(content)
-        result = self.superscript(content)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-            return 1
-        return 0
-
-    def _w_footnote_ref(self, ob, num, data):
-        num = int(num)
-        result = self.footnote_ref(num)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-            return 1
-        return 0
-
-    def _w_math(self, ob, text, displaymode, data):
-        text = to_string(text)
-        displaymode = int(displaymode)
-        result = self.math(text, displaymode)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-            return 1
-        return 0
-
-    def _w_raw_html(self, ob, text, data):
-        text = to_string(text)
-        result = self.raw_html(text)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-            return 1
-        return 0
-
-    def _w_entity(self, ob, text, data):
-        text = to_string(text)
-        result = self.entity(text)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-
-    def _w_normal_text(self, ob, text, data):
-        text = to_string(text)
-        result = self.normal_text(text)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-
-    def _w_doc_header(self, ob, inline_render, data):
-        inline_render = int(inline_render)
-        result = self.doc_header(inline_render)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
-
-    def _w_doc_footer(self, ob, inline_render, data):
-        inline_render = int(inline_render)
-        result = self.doc_footer(inline_render)
-        if result:
-            lib.hoedown_buffer_puts(ob, result.encode('utf-8'))
+        # Store the render class' handle in the render data.
+        self._data = ffi.new('hoedown_renderer_data *')
+        self.renderer.opaque = self._data
+        ffi.cast('hoedown_renderer_data *', self.renderer.opaque).opaque = \
+            self._renderer_handle
 
 
 class HtmlRenderer(BaseRenderer):
     """
     A wrapper for the HTML renderer that's included in Hoedown.
+
+    ``render_flags`` can be a list or tuple of flags (e.g.
+    ``('skip-html', 'hard-wrap')``) or an integer
+    (e.g. ``HTML_SKIP_HTML | HTML_HARD_WRAP``).
 
     ``nesting_level`` limits what's included in the table of contents.
     The default value is 0, no headers.
@@ -536,21 +225,17 @@ class HtmlRenderer(BaseRenderer):
     by the ``Markdown`` instance.
     """
     def __init__(self, flags=0, nesting_level=0):
-        flags = reduce_dict(html_flag_map, flags)
+        flags = args_to_int(html_flag_map, flags)
         self.renderer = self._new_renderer(flags, nesting_level)
-        callbacks = []
+        self._renderer_handle = ffi.new_handle(self)
 
-        for name, signature in _callback_signatures.items():
-            if not hasattr(self, name):
-                continue
+        # Store the render class' handle in the render state.
+        state = ffi.cast('hoedown_renderer_data *', self.renderer.opaque)
+        state.opaque = self._renderer_handle
 
-            wrapper = getattr(self, '_w_' + name)
-            callback = ffi.callback(signature, wrapper)
-            callbacks.append(callback)
-            setattr(self.renderer, name, callback)
-
-        # Prevent garbage collection of callbacks.
-        self._callbacks = callbacks
+        for name in python_callbacks.keys():
+            if hasattr(self, name):
+                setattr(self.renderer, name, python_callbacks[name])
 
     def _new_renderer(self, flags, nesting_level):
         return lib.hoedown_html_renderer_new(flags, nesting_level)
@@ -575,3 +260,119 @@ class HtmlTocRenderer(HtmlRenderer):
 
     def _new_renderer(self, flags, nesting_level):
         return lib.hoedown_html_toc_renderer_new(nesting_level)
+
+
+class SaferHtmlRenderer(HtmlRenderer):
+    """
+    A subclass of :class:`HtmlRenderer` which adds protections against
+    Cross-Site Scripting (XSS):
+
+    1. The ``'skip-html'`` flag is turned on by default, preventing injection of
+       HTML elements. If you want to escape HTML code instead of removing it
+       entirely, change ``sanitization_mode`` to ``'escape'``.
+    2. The URLs of links and images are filtered to prevent JavaScript injection.
+       This also blocks the rendering of email addresses into links.
+       See the :meth:`check_url` method below.
+    3. Optionally, the URLs can also be rewritten to counter other attacks such
+       as phishing.
+
+    Enabling URL rewriting requires extra arguments:
+
+    :arg link_rewrite: the URL of a redirect page, necessary to rewrite the
+        ``href`` attributes of links
+    :arg img_src_rewrite: the URL of an image proxy, necessary to rewrite the
+        ``src`` attributes of images
+
+    Both strings should include a ``{url}`` placeholder for the URL-encoded
+    target. Examples::
+
+        link_rewrite='https://example.com/redirect?url={url}',
+        img_src_rewrite='https://img-proxy-domain/{url}'
+
+    .. versionadded:: 2.1.0
+    """
+    _allowed_url_re = re.compile(r'^https?:', re.I)
+
+    def __init__(self, flags=(), sanitization_mode='skip-html', nesting_level=0,
+                 link_rewrite=None, img_src_rewrite=None):
+        if not isinstance(flags, tuple):
+            raise TypeError("`flags` should be a tuple of strings")
+        HtmlRenderer.__init__(self, flags + (sanitization_mode,), nesting_level)
+        self.link_rewrite = link_rewrite
+        self.img_src_rewrite = img_src_rewrite
+
+    def autolink(self, raw_url, is_email):
+        """
+        Filters links generated by the ``autolink`` extension.
+        """
+        if self.check_url(raw_url):
+            url = self.rewrite_url(('mailto:' if is_email else '') + raw_url)
+            url = escape_html(url)
+            return '<a href="%s">%s</a>' % (url, escape_html(raw_url))
+        else:
+            return escape_html('<%s>' % raw_url)
+
+    def image(self, raw_url, title='', alt=''):
+        """
+        Filters the ``src`` attribute of an image.
+
+        Note that filtering the source URL of an ``<img>`` tag is only a very
+        basic protection, and it's mostly useless in modern browsers (they block
+        JavaScript in there by default). An example of attack that filtering
+        does not thwart is phishing based on HTTP Auth, see `this issue
+        <https://github.com/liberapay/liberapay.com/issues/504>`_ for details.
+
+        To mitigate this issue you should only allow images from trusted services,
+        for example your own image store, or a proxy (see :meth:`rewrite_url`).
+        """
+        if self.check_url(raw_url, is_image_src=True):
+            url = self.rewrite_url(raw_url, is_image_src=True)
+            maybe_alt = ' alt="%s"' % escape_html(alt) if alt else ''
+            maybe_title = ' title="%s"' % escape_html(title) if title else ''
+            url = escape_html(url)
+            return '<img src="%s"%s%s />' % (url, maybe_alt, maybe_title)
+        else:
+            return escape_html("![%s](%s)" % (alt, raw_url))
+
+    def link(self, content, raw_url, title=''):
+        """
+        Filters links.
+        """
+        if self.check_url(raw_url):
+            url = self.rewrite_url(raw_url)
+            maybe_title = ' title="%s"' % escape_html(title) if title else ''
+            url = escape_html(url)
+            return ('<a href="%s"%s>' + content + '</a>') % (url, maybe_title)
+        else:
+            return escape_html("[%s](%s)" % (content, raw_url))
+
+    def check_url(self, url, is_image_src=False):
+        """
+        This method is used to check a URL.
+
+        Returns :obj:`True` if the URL is "safe", :obj:`False` otherwise.
+
+        The default implementation only allows HTTP and HTTPS links. That means
+        no ``mailto:``, no ``xmpp:``, no ``ftp:``, etc.
+
+        This method exists specifically to allow easy customization of link
+        filtering through subclassing, so don't hesitate to write your own.
+
+        If you're thinking of implementing a blacklist approach, see
+        "`Which URL schemes are dangerous (XSS exploitable)?
+        <http://security.stackexchange.com/q/148428/37409>`_".
+        """
+        return bool(self._allowed_url_re.match(url))
+
+    def rewrite_url(self, url, is_image_src=False):
+        """
+        This method is called to rewrite URLs.
+
+        It uses either ``self.link_rewrite`` or ``self.img_src_rewrite``
+        depending on the value of ``is_image_src``. The URL is returned
+        unchanged if the corresponding attribute is :obj:`None`.
+        """
+        rewrite = self.img_src_rewrite if is_image_src else self.link_rewrite
+        if rewrite:
+            return rewrite.format(url=urlquote(url))
+        return url

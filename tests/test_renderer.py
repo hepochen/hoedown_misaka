@@ -34,11 +34,11 @@ tests = (
             4. Four
             """,
         'expected': """\
-            [LIST ordered=true]
-            [LISTITEM ordered=true] One
-            [LISTITEM ordered=true] Two
-            [LISTITEM ordered=true] Three
-            [LISTITEM ordered=true] Four
+            [LIST ordered=true block=false]
+            [LISTITEM ordered=true block=false] One
+            [LISTITEM ordered=true block=false] Two
+            [LISTITEM ordered=true block=false] Three
+            [LISTITEM ordered=true block=false] Four
             """
     }),
     ('unordered_list', {
@@ -49,11 +49,11 @@ tests = (
              - Four
             """,
         'expected': """\
-            [LIST ordered=false]
-            [LISTITEM ordered=false] One
-            [LISTITEM ordered=false] Two
-            [LISTITEM ordered=false] Three
-            [LISTITEM ordered=false] Four
+            [LIST ordered=false block=false]
+            [LISTITEM ordered=false block=false] One
+            [LISTITEM ordered=false block=false] Two
+            [LISTITEM ordered=false block=false] Three
+            [LISTITEM ordered=false block=false] Four
             """
     }),
     ('unordered_list_block', {
@@ -67,11 +67,11 @@ tests = (
              - Four
              """,
         'expected': """\
-            [LIST ordered=false]
-            [LISTITEM ordered=false] [PARAGRAPH] One
-            [LISTITEM ordered=false] [PARAGRAPH] Two
-            [LISTITEM ordered=false] [PARAGRAPH] Three
-            [LISTITEM ordered=false] [PARAGRAPH] Four
+            [LIST ordered=false block=true]
+            [LISTITEM ordered=false block=true] [PARAGRAPH] One
+            [LISTITEM ordered=false block=true] [PARAGRAPH] Two
+            [LISTITEM ordered=false block=true] [PARAGRAPH] Three
+            [LISTITEM ordered=false block=true] [PARAGRAPH] Four
             """
     }),
     ('table', {
@@ -207,54 +207,34 @@ class TestRenderer(m.BaseRenderer):
     def hrule(self):
         return '[HRULE]'
 
-    def list(self, content, flags):
-        if flags & m.LIST_ORDERED:
-            ordered = 'true'
-        else:
-            ordered = 'false'
+    def list(self, content, is_ordered, is_block):
+        ordered = 'true' if is_ordered else 'false'
+        block = 'true' if is_block else 'false'
+        return '[LIST ordered={1} block={2}]\n{0}'.format(content, ordered, block)
 
-        return '[LIST ordered={1}]\n{0}'.format(content, ordered)
-
-    def listitem(self, content, flags):
-        if flags & m.LIST_ORDERED:
-            ordered = 'true'
-        else:
-            ordered = 'false'
-
-        return '[LISTITEM ordered={1}] {0}'.format(content, ordered)
+    def listitem(self, content, is_ordered, is_block):
+        ordered = 'true' if is_ordered else 'false'
+        block = 'true' if is_block else 'false'
+        return '[LISTITEM ordered={1} block={2}] {0}'.format(content, ordered, block)
 
     def paragraph(self, text):
         return '[PARAGRAPH] {0}\n'.format(text)
 
     def table(self, content):
-        return '[TABLE]\n{}'.format(content)
+        return '[TABLE]\n{0}'.format(content)
 
     def table_header(self, content):
-        return '[TABLE_HEADER]\n{}'.format(content)
+        return '[TABLE_HEADER]\n{0}'.format(content)
 
     def table_body(self, content):
-        return '[TABLE_BODY]\n{}'.format(content)
+        return '[TABLE_BODY]\n{0}'.format(content)
 
     def table_row(self, content):
         return '[TABLE_ROW]\n{0}\n'.format(content)
 
-    def table_cell(self, text, flags):
-        align_bit = flags & m.TABLE_ALIGNMASK
-
-        if align_bit == m.TABLE_ALIGN_CENTER:
-            align = 'align=center '
-        elif align_bit == m.TABLE_ALIGN_LEFT:
-            align = 'align=left '
-        elif align_bit == m.TABLE_ALIGN_RIGHT:
-            align = 'align=right '
-        else:
-            align = ''
-
-        if flags & m.TABLE_HEADER:
-            header = 'header=true '
-        else:
-            header = ''
-
+    def table_cell(self, text, align, is_header):
+        align = 'align={0} '.format(align) if align else ''
+        header = 'header=true ' if is_header else ''
         return '[TABLE_CELL {2}{1}text={0}]'.format(text, align, header)
 
     def footnotes(self, text):
@@ -269,12 +249,8 @@ class TestRenderer(m.BaseRenderer):
     def blockhtml(self, text):
         return '[BLOCKHTML] {0}'.format(text)
 
-    def autolink(self, link, type):
-        if type == m.AUTOLINK_EMAIL:
-            email = 'true'
-        else:
-            email = 'false'
-
+    def autolink(self, link, is_email):
+        email = 'true' if is_email else 'false'
         return '[AUTOLINK email={1}] {0}'.format(link, email)
 
     def codespan(self, text):
@@ -302,7 +278,7 @@ class TestRenderer(m.BaseRenderer):
         return '[LINEBREAK]'
 
     def link(self, content, link, title):
-        return '[LINK link={} title={}] {}'.format(link, title, content)
+        return '[LINK link={0} title={1}] {2}'.format(link, title, content)
 
     def strikethrough(self, text):
         return '[STRIKETHROUGH] {0}'.format(text)
@@ -317,7 +293,7 @@ class TestRenderer(m.BaseRenderer):
         return '[TRIPLE_EMPHASIS] {0}'.format(text)
 
     def math(self, text, displaymode):
-        return '[MATH] {}'.format(text)
+        return '[MATH] {0}'.format(text)
 
     def normal_text(self, text):
         return text
@@ -336,10 +312,10 @@ class TestRendererLowlevel(m.BaseRenderer):
         return text
 
     def entity(self, text):
-        return '[ENTITY] {}'.format(text)
+        return '[ENTITY] {0}'.format(text)
 
     def normal_text(self, text):
-        return '[NORMAL_TEXT] {}'.format(text)
+        return '[NORMAL_TEXT] {0}'.format(text)
 
 
 class CustomRendererTest(TestCase):
@@ -357,7 +333,7 @@ class CustomRendererTest(TestCase):
                 'math'))
 
         # EXT_UNDERLINE Clashes with emphasis.
-        render_underline = m.Markdown(TestRenderer(), m.EXT_UNDERLINE)
+        render_underline = m.Markdown(TestRenderer(), ('underline',))
         render_lowlevel = m.Markdown(TestRendererLowlevel())
         render_hf = m.Markdown(TestRendererHeaderFooter())
 

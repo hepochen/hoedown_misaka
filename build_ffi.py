@@ -55,7 +55,9 @@ ffi.set_source(
     """\
 #include "hoedown/buffer.h"
 #include "hoedown/document.h"
+#include "hoedown/escape.h"
 #include "hoedown/html.h"
+#include "extra.h"
 """,
     sources=(
         'misaka/hoedown/version.c',
@@ -67,6 +69,7 @@ ffi.set_source(
         'misaka/hoedown/document.c',
         'misaka/hoedown/buffer.c',
         'misaka/hoedown/autolink.c',
+        'misaka/extra.c',
     ),
     include_dirs=('misaka',))
 
@@ -80,33 +83,33 @@ ffi.cdef("""\
 
 typedef enum hoedown_extensions {{
     /* block-level extensions */
-    HOEDOWN_EXT_TABLES = {},
-    HOEDOWN_EXT_FENCED_CODE = {},
-    HOEDOWN_EXT_FOOTNOTES = {},
-    HOEDOWN_EXT_AUTOLINK = {},
-    HOEDOWN_EXT_STRIKETHROUGH = {},
-    HOEDOWN_EXT_UNDERLINE = {},
-    HOEDOWN_EXT_HIGHLIGHT = {},
-    HOEDOWN_EXT_QUOTE = {},
-    HOEDOWN_EXT_SUPERSCRIPT = {},
-    HOEDOWN_EXT_MATH = {},
-    HOEDOWN_EXT_NO_INTRA_EMPHASIS = {},
-    HOEDOWN_EXT_SPACE_HEADERS = {},
-    HOEDOWN_EXT_MATH_EXPLICIT = {},
-    HOEDOWN_EXT_DISABLE_INDENTED_CODE = {}
+    HOEDOWN_EXT_TABLES = {0},
+    HOEDOWN_EXT_FENCED_CODE = {1},
+    HOEDOWN_EXT_FOOTNOTES = {2},
+    HOEDOWN_EXT_AUTOLINK = {3},
+    HOEDOWN_EXT_STRIKETHROUGH = {4},
+    HOEDOWN_EXT_UNDERLINE = {5},
+    HOEDOWN_EXT_HIGHLIGHT = {6},
+    HOEDOWN_EXT_QUOTE = {7},
+    HOEDOWN_EXT_SUPERSCRIPT = {8},
+    HOEDOWN_EXT_MATH = {9},
+    HOEDOWN_EXT_NO_INTRA_EMPHASIS = {10},
+    HOEDOWN_EXT_SPACE_HEADERS = {11},
+    HOEDOWN_EXT_MATH_EXPLICIT = {12},
+    HOEDOWN_EXT_DISABLE_INDENTED_CODE = {13}
 }} hoedown_extensions;
 
 typedef enum hoedown_list_flags {{
-    HOEDOWN_LIST_ORDERED = {},
-    HOEDOWN_LI_BLOCK = {}
+    HOEDOWN_LIST_ORDERED = {14},
+    HOEDOWN_LI_BLOCK = {15}
 }} hoedown_list_flags;
 
 typedef enum hoedown_table_flags {{
-    HOEDOWN_TABLE_ALIGN_LEFT = {},
-    HOEDOWN_TABLE_ALIGN_RIGHT = {},
-    HOEDOWN_TABLE_ALIGN_CENTER = {},
-    HOEDOWN_TABLE_ALIGNMASK = {},
-    HOEDOWN_TABLE_HEADER = {}
+    HOEDOWN_TABLE_ALIGN_LEFT = {16},
+    HOEDOWN_TABLE_ALIGN_RIGHT = {17},
+    HOEDOWN_TABLE_ALIGN_CENTER = {18},
+    HOEDOWN_TABLE_ALIGNMASK = {19},
+    HOEDOWN_TABLE_HEADER = {20}
 }} hoedown_table_flags;
 
 // ----------------------
@@ -114,10 +117,10 @@ typedef enum hoedown_table_flags {{
 // ----------------------
 
 typedef enum hoedown_html_flags {{
-    HOEDOWN_HTML_SKIP_HTML = {},
-    HOEDOWN_HTML_ESCAPE = {},
-    HOEDOWN_HTML_HARD_WRAP = {},
-    HOEDOWN_HTML_USE_XHTML = {}
+    HOEDOWN_HTML_SKIP_HTML = {21},
+    HOEDOWN_HTML_ESCAPE = {22},
+    HOEDOWN_HTML_HARD_WRAP = {23},
+    HOEDOWN_HTML_USE_XHTML = {24}
 }} hoedown_html_flags;
 """.format(
     EXT_TABLES,
@@ -253,6 +256,12 @@ hoedown_document *hoedown_document_new(
 void hoedown_document_render(hoedown_document *doc, hoedown_buffer *ob, const uint8_t *data, size_t size);
 void hoedown_document_free(hoedown_document *doc);
 
+// ------------------------
+// --- hoedown/escape.h ---
+// ------------------------
+
+void hoedown_escape_html(hoedown_buffer *ob, const uint8_t *data, size_t size, int secure);
+
 // ----------------------
 // --- hoedown/html.h ---
 // ----------------------
@@ -274,6 +283,12 @@ hoedown_renderer *hoedown_html_toc_renderer_new(
 );
 void hoedown_html_renderer_free(hoedown_renderer *renderer);
 void hoedown_html_smartypants(hoedown_buffer *ob, const uint8_t *data, size_t size);
+
+// ---------------
+// --- extra.h ---
+// ---------------
+
+void *misaka_get_renderer(const hoedown_renderer_data *data);
 """)
 
 

@@ -1,5 +1,8 @@
-include README.rst setup.py build_ffi.py THANKS LICENSE.txt
+include README.rst setup.py build_ffi.py THANKS LICENSE.txt tox.ini
 recursive-include misaka *
+recursive-exclude misaka *.so
+prune misaka/__pycache__
 recursive-include docs *
+prune docs/_build
 recursive-include tests *
-recursive-include benchmark *
+prune tests/__pycache__

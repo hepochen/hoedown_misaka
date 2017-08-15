@@ -10,22 +10,15 @@ from os.path import dirname, join as jp, splitext
 CWD = dirname(sys.modules[__name__].__file__)
 sys.path.insert(0, jp(CWD, '..'))
 
-from chibitest import runner, TestCase
+from chibitest import runner, TestCase, Benchmark
 
 
 help_message = """\
---include and --exclude can be used multiple times and both accept a list
-of names (names of the test case classes). The order of --include and
---exclude is not significant. Everything listed in --exclude will be filtered
-out of the list of tests.
-
---list output a list of test cases.
-
-Arguments:
-    --include [[[TestCase1] TestCase2] ...]
-    --exclude [[[TestCase1] TestCase2] ...]
-    --list
-    --help
+Options:
+  --include (-i)    comma separated list of testcases
+  --exclude (-e)    comma separated list of testcases
+  --benchmark (-b)  run bechmarks
+  --list (-l)       list all testcases
 """
 
 
@@ -40,47 +33,65 @@ def get_test_modules():
     return modules
 
 
-def is_test(n):
-    return inspect.isclass(n) and issubclass(n, TestCase) and not n is TestCase
+def is_testcase(n):
+    return inspect.isclass(n) \
+        and issubclass(n, TestCase) \
+        and not n is TestCase \
+        and not n is Benchmark
 
 
-def get_tests(module):
-    return [(testcase.name(), testcase) \
-        for _, testcase in inspect.getmembers(module, is_test)]
+def is_benchmark(n):
+    return inspect.isclass(n) \
+        and issubclass(n, Benchmark) \
+        and not n is Benchmark
 
 
-def run_tests(tests, include=[], exclude=[]):
+def get_testcases(module):
+    return [(testcase.__name__, testcase) \
+        for _, testcase in inspect.getmembers(module, is_testcase)]
+
+
+def run_testcases(testcases, benchmark=False, include=[], exclude=[]):
     if include:
-        tests = [n for n in tests if n[0] in include]
+        testcases = [n for n in testcases if n[0] in include]
     if exclude:
-        tests = [n for n in tests if not n[0] in exclude]
+        testcases = [n for n in testcases if not n[0] in exclude]
 
-    runner([n[1] for n in tests])
+    if benchmark:
+        testcases = [n[1] for n in testcases if is_benchmark(n[1])]
+    else:
+        testcases = [n[1] for n in testcases if not is_benchmark(n[1])]
+
+    runner(testcases)
 
 
 if __name__ == '__main__':
-    tests = list(chain(*map(get_tests, get_test_modules())))
+    testcases = list(chain(*map(get_testcases, get_test_modules())))
     include = []
     exclude = []
+    benchmark = False
 
     if len(sys.argv) >= 2:
-        if sys.argv[1] == '--list':
-            for name, testcase in tests:
+        if sys.argv[1] in ('-l', '--list'):
+            for name, testcase in testcases:
                 print(name)
             sys.exit(0)
-        elif sys.argv[1] == '--help':
+        elif sys.argv[1] in ('-h', '--help'):
             print(help_message)
             sys.exit(0)
         else:
             last_arg = '--include'
-
             for arg in sys.argv[1:]:
-                if arg in ('--include', '--exclude'):
+                if arg in ('-i', '--include', '-e', '--exclude'):
                     last_arg = arg
-                elif not arg.startswith('--'):
-                    if last_arg == '--include':
-                        include.append(arg)
-                    elif last_arg == '--exclude':
-                        exclude.append(arg)
+                elif not arg.startswith('-'):  # - or --
+                    arg = [n for n in arg.split(',') if n]
+                    if last_arg in ('-i', '--include'):
+                        include.extend(arg)
+                    elif last_arg in ('-e', '--exclude'):
+                        exclude.extend(arg)
 
-    run_tests(tests, include, exclude)
+    if '-b' in sys.argv[1:] or '--benchmark' in sys.argv[1:]:
+        benchmark = True
+
+    run_testcases(testcases, benchmark, include, exclude)

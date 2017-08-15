@@ -5,11 +5,26 @@ Changelog
 
 Date format is year-month-day.
 
+2.1.0 (2017-01-15)
+^^^^^^^^^^^^^^^^^^
 
-2.0.0b2 (2015-08-??)
-^^^^^^^^^^^^^^^^^^^^
+- Add a new renderer class with XSS protections. By Changaco. (`#60`_)
+- Add Python 2.6 support. By sprin. (`#48`_)
+- Add Termux_ installation instructions to documentation.
+- Update Hoedown source files.
+
+.. _#60: https://github.com/FSX/misaka/pull/60
+.. _#48: https://github.com/FSX/misaka/pull/48
+.. _Termux: https://github.com/termux/termux-packages/issues/218
+
+
+2.0.0 (2015-10-22)
+^^^^^^^^^^^^^^^^^^
 
 - Rename ``Markdown.render`` to ``Markdown.__call__``.
+- Add a bechmark testcase to chibitest.
+- Simplify arguments of ``list``, ``list_item``, ``autolink`` and
+  ``table_cell`` render callbacks.
 
 
 2.0.0b1 (2015-07-18)
