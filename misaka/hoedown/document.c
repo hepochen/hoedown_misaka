@@ -849,13 +849,14 @@ char_codespan(hoedown_buffer *ob, hoedown_document *doc, uint8_t *data, size_t o
 		return 0; /* no matching delimiter */
 
 	/* trimming outside spaces */
+	// hepo: will crash on Mac?
 	f_begin = nb;
-	while (f_begin < end && data[f_begin] == ' ')
-		f_begin++;
+	//while (f_begin < end && data[f_begin] == ' ')
+	//	f_begin++;
 
 	f_end = end - nb;
-	while (f_end > nb && data[f_end-1] == ' ')
-		f_end--;
+	//while (f_end > 1 && f_end > nb && data[f_end-1] == ' ')
+	//	f_end--;
 
 	/* real code span */
 	if (f_begin < f_end) {
@@ -1517,6 +1518,9 @@ is_atxheader(hoedown_document *doc, uint8_t *data, size_t size)
 static int
 is_headerline(uint8_t *data, size_t size)
 {
+    /* disable it by hepo */
+    return 0;
+
 	size_t i = 0;
 
 	/* test of level 1 header */
@@ -1981,9 +1985,19 @@ static size_t
 parse_list(hoedown_buffer *ob, hoedown_document *doc, uint8_t *data, size_t size, hoedown_list_flags flags)
 {
 	hoedown_buffer *work = 0;
-	size_t i = 0, j;
+	size_t beg = 0, i = 0, j;
 
 	work = newbuf(doc, BUFFER_BLOCK);
+
+	beg = prefix_uli(data, size);
+    if (!beg)
+        beg = prefix_oli(data, size);
+
+    if (beg > 0) {
+        hoedown_buffer_puts(work, "<!--");
+        hoedown_buffer_put(work, data, beg);
+        hoedown_buffer_puts(work, "-->");
+    }
 
 	while (i < size) {
 		j = parse_listitem(work, doc, data + i, size - i, &flags);
