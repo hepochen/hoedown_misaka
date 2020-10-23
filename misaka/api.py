@@ -63,7 +63,7 @@ __all__ = [
 
 IUNIT = 1024
 OUNIT = 64
-MAX_NESTING = 16
+MAX_NESTING = 32
 
 
 def escape_html(text, escape_slash=False):
